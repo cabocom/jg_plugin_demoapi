@@ -22,3 +22,4 @@ A diferencia de aproximaciones simplistas donde todas las consultas `GET` se cat
 - Consultas `GET` hacia endpoints que contienen términos sensibles (`/admin/`, `/billing/`, `/salaries`, `/audit`, `/credentials`) o que exigen scopes de seguridad en la especificación OpenAPI (ej. `security: [{"admin_auth": ["write:all"]}]`).
 - **Riesgo:** `RiskLevel.HIGH`
 - **Gobernanza:** Escala a `RiskLevel.HIGH` y exige autorización humana previa para evitar exfiltración pasiva de información corporativa sensible.
+

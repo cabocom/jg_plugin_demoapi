@@ -14,3 +14,4 @@ Bienvenido a la documentación oficial de **`jg_plugin_demoapi`**, plugin para l
    - Clasificación semántica de operaciones mutativas y GETs sensibles.
 4. **[04. Testing, Calidad y CI/CD](04_testing_quality_cicd.md)**
    - Suite unitaria Pytest, entorno mock y pipeline de CI/CD.
+

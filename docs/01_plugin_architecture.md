@@ -45,3 +45,4 @@
 - Cero dependencias de frameworks web como FastAPI o LangGraph.
 - Consumo exclusivo de los contratos de `jg_agente_sdk`.
 - Interacción para prospectos canalizada a través del portal público `jg_hub` (`ApiDemoComponent`), sin acoplar la consola de `jg_dashboard`.
+

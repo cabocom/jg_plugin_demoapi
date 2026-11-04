@@ -27,3 +27,4 @@ A partir de cada endpoint y método HTTP del contrato OpenAPI ingerido, el plugi
 - **Nombre:** Derivado del `operationId` OpenAPI (ej. `demoapi_listUsers`, `demoapi_deleteOrder`).
 - **Esquema de Entrada:** Modelo Pydantic v2 dinámico generado al vuelo (`pydantic.create_model`) tipando parámetros de ruta, query y body.
 - **Ejecución HTTP:** Cliente asíncrono `httpx.AsyncClient` con DNS Pinning inyectado en el transporte.
+

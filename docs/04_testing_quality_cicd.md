@@ -22,3 +22,4 @@ El pipeline en GitLab garantiza:
 1. `ruff check .` y `ruff format --check .`
 2. `pytest tests/`
 3. Empaquetado `python -m build` y verificación de tipos.
+
