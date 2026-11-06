@@ -6,7 +6,7 @@ Plugin oficial de ingesta dinámica de OpenAPI, gobierno granular de riesgos (HI
 
 ## 1. Misión del Componente
 
-`jg_plugin_demoapi` permite a clientes y prospectos conectar contratos OpenAPI/Swagger v3.x en tiempo de ejecución o evaluar el comportamiento del agente mediante un entorno mock integrado.
+`jg_plugin_demoapi` permite a clientes y prospectos conectar contratos OpenAPI/Swagger v3.x en tiempo de ejecución o evaluar el comportamiento del agente mediante un entorno mock integrado. 
 
 ### Invariantes y Principios de Diseño:
 1. **Desacoplamiento Radical de la Interfaz:** Cero uso de `jg_dashboard`. Toda la experiencia de interacción, visualización y gobernanza HITL de cara al cliente se gestiona exclusivamente dentro de `jg_hub` (Livewire 3).
