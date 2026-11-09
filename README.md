@@ -1,6 +1,24 @@
 > ⚠️ **Nota:** Este repositorio es un *mirror* público sincronizado automáticamente desde [GitLab](https://gitlab.com/javiergalvez-ia). El desarrollo activo, pipelines CI/CD, *issues* y discusiones técnicas se gestionan en https://gitlab.com/javiergalvez-ia
 
-# jg_plugin_demoapi
+<div align="center">
+
+# 🔌 `jg_plugin_demoapi`
+
+### Plugin de Ingesta Dinámica de OpenAPI para `jg_agente`
+*Caché ETag en 2 Niveles, Gobierno Granular HITL y Protección Anti-SSRF con DNS Pinning*
+
+[![GitLab CI/CD](https://img.shields.io/badge/GitLab_CI-Pipeline_Passing-108548?style=flat-square&logo=gitlab&logoColor=white)](https://gitlab.com/javiergalvez-ia/jg_plugin_demoapi)
+[![Mirror to GitHub](https://img.shields.io/badge/GitHub-Mirror_Active-181717?style=flat-square&logo=github&logoColor=white)](https://github.com/cabocom/jg_plugin_demoapi)
+[![Python](https://img.shields.io/badge/Python-3.11%2B-blue?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
+[![OpenAPI](https://img.shields.io/badge/OpenAPI-v3.x-6BA539?style=flat-square&logo=openapi-initiative&logoColor=white)](https://www.openapis.org/)
+[![SDK](https://img.shields.io/badge/SDK-jg--agente--sdk-e92063?style=flat-square)](https://pypi.org/project/jg-agente-sdk/)
+[![Security](https://img.shields.io/badge/Security-SSRF_%26_DNS_Pinning-crimson?style=flat-square&logo=shield&logoColor=white)](#1-misión-del-componente)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json&style=flat-square)](https://github.com/astral-sh/ruff)
+[![Tests](https://img.shields.io/badge/Tests-21_passing-success?style=flat-square&logo=pytest&logoColor=white)](#1-misión-del-componente)
+
+</div>
+
+---
 
 Plugin oficial de ingesta dinámica de OpenAPI, gobierno granular de riesgos (HITL), caché en dos niveles (ETag) y simulación de APIs para el runtime cognitivo **`jg_agente`**, desarrollado sobre **`jg_agente_sdk`**.
 
