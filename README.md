@@ -1,3 +1,5 @@
+> ⚠️ **Nota:** Este repositorio es un *mirror* público sincronizado automáticamente desde [GitLab](https://gitlab.com/javiergalvez-ia). El desarrollo activo, pipelines CI/CD, *issues* y discusiones técnicas se gestionan en https://gitlab.com/javiergalvez-ia
+
 # jg_plugin_demoapi
 
 Plugin oficial de ingesta dinámica de OpenAPI, gobierno granular de riesgos (HITL), caché en dos niveles (ETag) y simulación de APIs para el runtime cognitivo **`jg_agente`**, desarrollado sobre **`jg_agente_sdk`**.
