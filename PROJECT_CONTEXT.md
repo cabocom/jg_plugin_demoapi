@@ -1,10 +1,10 @@
 # CONTEXTO DE PROYECTO: jg_plugin_demoapi
 
-**Versión del documento:** 1.0.1  
-**Fecha de consolidación:** 9 de noviembre de 2026  
+**Versión del documento:** 2.0.0  
+**Fecha de consolidación:** 12 de noviembre de 2026  
 **Componente:** Plugin de Ingesta Dinámica de OpenAPI, Gobierno Granular de Riesgos, Caché ETag y Simulación de APIs  
 **Stack Tecnológico:** Python >= 3.11, Pydantic v2, HTTPX, PyYAML, jg-agente-sdk, Pytest, Ruff  
-**Estado:** Operativo / Contratos canónicos verificados al 100% y sincronización automática de *mirror* público hacia `https://github.com/cabocom/jg_plugin_demoapi` (`workspace#8`).
+**Estado:** Refactorización estructural v2.0 SOLID completada (jg_plugin_demoapi#2). Extracción de esquemas Pydantic a `schemas.py` y adecuación de `tools.py` (<300 LOC). 100% de tests pasando y Ruff limpio.
 
 ---
 

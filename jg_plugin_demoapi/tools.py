@@ -13,36 +13,14 @@ from jg_sdk.contracts import (
     ToolResult,
     ToolType,
 )
-from pydantic import BaseModel, Field
 
 from jg_plugin_demoapi.cache import TwoLevelCache
 from jg_plugin_demoapi.mock import DEMO_MOCK_OPENAPI_SPEC, get_mock_spec_json
 from jg_plugin_demoapi.parser import OpenAPIParser
+from jg_plugin_demoapi.schemas import GetMockSpecInput, LoadOpenApiInput
 from jg_plugin_demoapi.ssrf import SSRFValidationError, SSRFValidator
 
 logger = logging.getLogger("jg_plugin_demoapi.tools")
-
-
-class LoadOpenApiInput(BaseModel):
-    """Esquema de entrada para ingesta dinámica de contratos OpenAPI."""
-
-    openapi_url: str = Field(
-        ...,
-        description="URL absoluta HTTP/HTTPS del contrato OpenAPI/Swagger (JSON o YAML), o 'mock' para el contrato de prueba.",
-    )
-    force_refresh: bool = Field(
-        default=False,
-        description="Fuerza la descarga ignorando la memoria en caliente del Nivel 1.",
-    )
-
-
-class GetMockSpecInput(BaseModel):
-    """Esquema de entrada para consulta de especificación mock."""
-
-    include_json: bool = Field(
-        default=False,
-        description="Indica si debe incluirse la cadena JSON íntegra en la respuesta.",
-    )
 
 
 class DemoApiToolManager:
@@ -306,3 +284,14 @@ def get_canonical_tools(manager: DemoApiToolManager | None = None) -> list[Agent
         create_load_openapi_tool(mgr),
         create_get_mock_spec_tool(),
     ]
+
+
+__all__ = [
+    "DemoApiToolManager",
+    "GetMockSpecInput",
+    "LoadOpenApiInput",
+    "create_get_mock_spec_tool",
+    "create_load_openapi_tool",
+    "get_canonical_tools",
+    "get_default_manager",
+]
