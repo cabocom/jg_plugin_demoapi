@@ -20,3 +20,4 @@
 ## 3. Verificación
 - 21 tests unitarios PASARON al 100% (`pytest`).
 - Linters `ruff check .` y `ruff format --check .` pasados con 0 errores.
+
