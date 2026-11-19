@@ -63,3 +63,13 @@ async def test_resolve_and_pin_allowlist():
     assert pinned.port == 8089
     assert pinned.is_ssl is False
     assert "8089" in pinned.build_pinned_url()
+
+
+@pytest.mark.asyncio
+async def test_resolve_and_pin_empty_allowlist_rejects_localhost() -> None:
+    """Verifica que sin allowlist explícita, localhost sea bloqueado de inmediato."""
+    with pytest.raises(SSRFValidationError, match="restringida|prohibida"):
+        await SSRFValidator.resolve_and_pin_url_async(
+            "http://localhost:8089/openapi.json",
+            allowlist=[],
+        )

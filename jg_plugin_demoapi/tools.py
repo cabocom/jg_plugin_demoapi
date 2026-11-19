@@ -5,20 +5,22 @@ from __future__ import annotations
 import logging
 import time
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
-from jg_sdk.contracts import (
-    AgentTool,
-    RiskLevel,
-    ToolResult,
-    ToolType,
-)
+from jg_sdk.contracts import AgentTool
 
 from jg_plugin_demoapi.cache import TwoLevelCache
-from jg_plugin_demoapi.mock import DEMO_MOCK_OPENAPI_SPEC, get_mock_spec_json
+from jg_plugin_demoapi.canonical_tools import (
+    create_get_mock_spec_tool,
+    create_load_openapi_tool,
+    get_canonical_tools,
+    get_default_manager,
+)
+from jg_plugin_demoapi.mock import DEMO_MOCK_OPENAPI_SPEC
 from jg_plugin_demoapi.parser import OpenAPIParser
 from jg_plugin_demoapi.schemas import GetMockSpecInput, LoadOpenApiInput
-from jg_plugin_demoapi.ssrf import SSRFValidationError, SSRFValidator
+from jg_plugin_demoapi.ssrf import SSRFValidator
 
 logger = logging.getLogger("jg_plugin_demoapi.tools")
 
@@ -34,8 +36,8 @@ class DemoApiToolManager:
         default_ttl: float = 300.0,
     ) -> None:
         self.cache = cache or TwoLevelCache(default_ttl_seconds=default_ttl)
-        self.parser = parser or OpenAPIParser()
-        self.allowlist = allowlist or ["localhost", "127.0.0.1", "mock-api"]
+        self.allowlist = list(allowlist) if allowlist is not None else []
+        self.parser = parser or OpenAPIParser(allowlist=self.allowlist)
         self.dynamic_tools: dict[str, AgentTool] = {}
 
     async def ingest_openapi(
@@ -89,8 +91,19 @@ class DemoApiToolManager:
         if existing_etag and not force_refresh:
             headers["If-None-Match"] = existing_etag
 
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(url_stripped, headers=headers)
+        # Aplicar IP fijada (DNS Pinning) y Host header para evitar DNS rebinding
+        parsed_origin = urlparse(url_stripped)
+        pinned_request_url = pinned.build_pinned_url(parsed_origin.path)
+        if parsed_origin.query:
+            pinned_request_url = f"{pinned_request_url}?{parsed_origin.query}"
+
+        host_header = pinned.hostname
+        if (pinned.is_ssl and pinned.port != 443) or (not pinned.is_ssl and pinned.port != 80):
+            host_header = f"{host_header}:{pinned.port}"
+        headers["Host"] = host_header
+
+        async with httpx.AsyncClient(timeout=15.0, follow_redirects=False) as client:
+            resp = await client.get(pinned_request_url, headers=headers)
 
             # Revalidación 304 Not Modified
             if resp.status_code == 304:
@@ -139,151 +152,6 @@ class DemoApiToolManager:
                 "duration_ms": duration_ms,
                 "endpoints_count": len(tools),
             }
-
-
-# Instancia singleton del manager por defecto
-_default_manager: DemoApiToolManager | None = None
-
-
-def get_default_manager() -> DemoApiToolManager:
-    global _default_manager
-    if _default_manager is None:
-        _default_manager = DemoApiToolManager()
-    return _default_manager
-
-
-def create_load_openapi_tool(manager: DemoApiToolManager | None = None) -> AgentTool:
-    """Crea la herramienta canónica de carga de contratos OpenAPI."""
-    active_manager = manager or get_default_manager()
-
-    async def _load_openapi(openapi_url: str, force_refresh: bool = False) -> ToolResult:
-        start_time = time.time()
-        try:
-            tools, telemetry = await active_manager.ingest_openapi(
-                openapi_url=openapi_url,
-                force_refresh=force_refresh,
-            )
-
-            # Clasificación del inventario
-            mutations = [t for t in tools if t.tool_type == ToolType.MUTATION]
-            high_risk = [t for t in tools if t.risk_level == RiskLevel.HIGH]
-            low_risk = [t for t in tools if t.risk_level == RiskLevel.LOW]
-            sensitive_reads = [t for t in tools if t.metadata.get("is_sensitive_read") is True]
-
-            summary = {
-                "openapi_url": openapi_url,
-                "telemetry": telemetry,
-                "total_tools": len(tools),
-                "summary": {
-                    "low_risk_public_reads": len(low_risk),
-                    "high_risk_mutations": len(mutations),
-                    "sensitive_reads_requiring_hitl_or_rbac": len(sensitive_reads),
-                    "total_requiring_hitl": len(high_risk),
-                },
-                "tools_manifest": [
-                    {
-                        "name": t.name,
-                        "method": t.metadata.get("openapi_method"),
-                        "path": t.metadata.get("openapi_path"),
-                        "risk_level": t.risk_level.value,
-                        "tool_type": t.tool_type.value,
-                        "requires_hitl": t.metadata.get("requires_hitl", False),
-                        "required_permissions": t.required_permissions,
-                    }
-                    for t in tools
-                ],
-            }
-
-            duration_ms = (time.time() - start_time) * 1000
-            return ToolResult(
-                success=True,
-                output=summary,
-                error=None,
-                duration_ms=duration_ms,
-                metadata=telemetry,
-            )
-        except SSRFValidationError as err:
-            duration_ms = (time.time() - start_time) * 1000
-            return ToolResult(
-                success=False,
-                output="",
-                error=f"Bloqueo de seguridad Anti-SSRF: {err}",
-                duration_ms=duration_ms,
-                metadata={"security_event": "ssrf_violation", "target": err.target},
-            )
-        except Exception as err:
-            duration_ms = (time.time() - start_time) * 1000
-            return ToolResult(
-                success=False,
-                output="",
-                error=f"Error durante la ingesta del contrato OpenAPI: {err}",
-                duration_ms=duration_ms,
-            )
-
-    return AgentTool(
-        name="demoapi_load_openapi",
-        description=(
-            "Ingiere dinámicamente una especificación OpenAPI/Swagger v3.x desde una URL o el entorno mock, "
-            "validando directivas anti-SSRF, aplicando caché en dos niveles (Memoria + ETag) "
-            "y clasificando granularmente las herramientas generadas según riesgo operativo (HITL/RBAC)."
-        ),
-        category="demoapi",
-        version="1.0.0",
-        args_schema=LoadOpenApiInput,
-        func=_load_openapi,
-        risk_level=RiskLevel.LOW,
-        tool_type=ToolType.OBSERVER,
-        read_only=True,
-        reversible=False,
-        idempotent=True,
-        makes_http_requests=True,
-        timeout_sec=30.0,
-    )
-
-
-def create_get_mock_spec_tool() -> AgentTool:
-    """Crea la herramienta canónica de consulta de contrato mock local."""
-
-    async def _get_mock_spec(include_json: bool = False) -> ToolResult:
-        summary = {
-            "title": DEMO_MOCK_OPENAPI_SPEC["info"]["title"],
-            "version": DEMO_MOCK_OPENAPI_SPEC["info"]["version"],
-            "paths_count": len(DEMO_MOCK_OPENAPI_SPEC["paths"]),
-            "paths": list(DEMO_MOCK_OPENAPI_SPEC["paths"].keys()),
-        }
-        if include_json:
-            summary["json_spec"] = get_mock_spec_json()
-
-        return ToolResult(
-            success=True,
-            output=summary,
-            duration_ms=0.5,
-        )
-
-    return AgentTool(
-        name="demoapi_get_mock_spec",
-        description="Consulta la definición y estructura del contrato OpenAPI mock integrado para pruebas locales.",
-        category="demoapi",
-        version="1.0.0",
-        args_schema=GetMockSpecInput,
-        func=_get_mock_spec,
-        risk_level=RiskLevel.LOW,
-        tool_type=ToolType.OBSERVER,
-        read_only=True,
-        reversible=False,
-        idempotent=True,
-        makes_http_requests=False,
-        timeout_sec=5.0,
-    )
-
-
-def get_canonical_tools(manager: DemoApiToolManager | None = None) -> list[AgentTool]:
-    """Retorna las herramientas canónicas base provistas por el plugin."""
-    mgr = manager or get_default_manager()
-    return [
-        create_load_openapi_tool(mgr),
-        create_get_mock_spec_tool(),
-    ]
 
 
 __all__ = [

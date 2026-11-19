@@ -35,5 +35,5 @@
   2. En `DemoApiToolManager.ingest_openapi` (`tools.py:78-93`), utilizar efectivamente la IP fijada en `pinned` (o transporte con pinning del SDK) en lugar de hacer `client.get(url_stripped)`.
   3. En `DemoApiToolManager.__init__` (`tools.py:38`), eliminar `"localhost"` y `"127.0.0.1"` de la `allowlist` por defecto en producción (`self.allowlist = allowlist if allowlist is not None else []`).
 - **Criterios de Aceptación (Checklist verificable):**
-  - [ ] Un spec OpenAPI cuyo `servers[0]["url"]` apunte a `http://127.0.0.1` o `http://169.254.169.254` es bloqueado por `SSRFValidationError` al invocar cualquiera de las herramientas generadas.
-  - [ ] Nuevos tests de seguridad en `jg_plugin_demoapi/tests/test_parser.py` y `test_ssrf.py`.
+  - [x] Un spec OpenAPI cuyo `servers[0]["url"]` apunte a `http://127.0.0.1` o `http://169.254.169.254` es bloqueado por `SSRFValidationError` al invocar cualquiera de las herramientas generadas.
+  - [x] Nuevos tests de seguridad en `jg_plugin_demoapi/tests/test_parser.py` y `test_ssrf.py`.

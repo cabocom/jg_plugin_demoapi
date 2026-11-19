@@ -1,10 +1,10 @@
 # CONTEXTO DE PROYECTO: jg_plugin_demoapi
 
-**Versión del documento:** 2.0.0  
-**Fecha de consolidación:** 12 de noviembre de 2026  
+**Versión del documento:** 2.1.0  
+**Fecha de consolidación:** 19 de noviembre de 2026  
 **Componente:** Plugin de Ingesta Dinámica de OpenAPI, Gobierno Granular de Riesgos, Caché ETag y Simulación de APIs  
 **Stack Tecnológico:** Python >= 3.11, Pydantic v2, HTTPX, PyYAML, jg-agente-sdk, Pytest, Ruff  
-**Estado:** Refactorización estructural v2.0 SOLID completada (jg_plugin_demoapi#2). Extracción de esquemas Pydantic a `schemas.py` y adecuación de `tools.py` (<300 LOC). 100% de tests pasando y Ruff limpio.
+**Estado:** Endurecimiento de Seguridad Anti-SSRF (ISSUE-18 / jg_plugin_demoapi#3) completado: mitigación de SSRF de 2º orden en herramientas OpenAPI dinámicas, DNS Pinning efectivo con `follow_redirects=False`, saneamiento de allowlist por defecto y modularización arquitectónica (<300 LOC). 100% tests pasando (23 tests) y Ruff limpio.
 
 ---
 
@@ -52,10 +52,12 @@ El plugin implementa en `tools.py` y `parser.py` tanto herramientas canónicas d
    - **Nivel 1 (Memoria en caliente):** Estructura `TwoLevelCache` en memoria que devuelve en <1 ms las herramientas si el TTL sigue vigente.
    - **Nivel 2 (Revalidación condicional ETag):** Si expira la memoria, envía `If-None-Match: <etag>`. Ante `304 Not Modified`, extiende el TTL sin retransferir ni reparsear el contrato. Ante `200 OK`, regenera las herramientas y actualiza el ETag.
 
-3. **Seguridad de Red y DNS Pinning (`ssrf.py`):**
+3. **Seguridad de Red, DNS Pinning y Mitigación de SSRF de 2º Orden (`ssrf.py`):**
    - Previene Server-Side Request Forgery antes de que cualquier cliente HTTP inicie la conexión TCP.
    - Resuelve el DNS de forma asíncrona y valida todas las IPs contra la lista negra de redes privadas y reservadas.
-   - Devuelve un `PinnedEndpoint` para atar la conexión evitando DNS rebinding entre la validación y la transferencia.
+   - Devuelve un `PinnedEndpoint` para atar la conexión evitando DNS rebinding entre la validación y la transferencia tanto al descargar contratos OpenAPI como al ejecutar las herramientas dinámicas generadas.
+   - Ejecución HTTP con `follow_redirects=False` para prevenir bypasses por redirecciones HTTP (301/302).
+   - Allowlist restrictiva por defecto (`[]` en producción) sin inclusión implícita de `localhost` o `127.0.0.1`.
 
 4. **Autodescubrimiento e Invocación CLI (`jg`):**
    - Declara el entry-point canónico en `pyproject.toml`:
@@ -74,19 +76,22 @@ jg_plugin_demoapi/
 ├── jg_plugin_demoapi/
 │   ├── __init__.py         # Re-exportación de contratos, plugin, parser y cache
 │   ├── cache.py            # Caché Nivel 1 (Memoria) y Nivel 2 (ETag / 304)
+│   ├── canonical_tools.py  # Herramientas canónicas base e inyección de dependencias
 │   ├── mock.py             # Fixture OpenAPI 3.x canónico para pruebas offline
-│   ├── parser.py           # Parser OpenAPI 3.x y generador de AgentTools Pydantic v2
+│   ├── parser.py           # Parser OpenAPI 3.x y generador de AgentTools seguras
 │   ├── plugin.py           # Clase principal DemoApiPlugin (BasePlugin)
 │   ├── risk.py             # Clasificador determinista de riesgos y directivas HITL/RBAC
+│   ├── schema_builder.py   # Constructor dinámico de esquemas Pydantic v2
+│   ├── schemas.py          # Esquemas Pydantic tipados de entrada
 │   ├── ssrf.py             # Validador Anti-SSRF y resolución con DNS Pinning
-│   └── tools.py            # Herramientas canónicas y gestor de ingesta dinámica
-├── tests/                  # Suite de 21 tests unitarios y de integración (100% pasando)
+│   └── tools.py            # Gestor de ingesta dinámica y ciclo de vida de herramientas
+├── tests/                  # Suite de 23 tests unitarios y de integración (100% pasando)
 │   ├── test_cache.py       # Validación de memoria <1ms, expiración y revalidación 304
 │   ├── test_e2e_mock.py    # Pruebas de ejecución simulada con MockTransport
-│   ├── test_parser.py      # Validación de esquemas Pydantic v2 y endpoints generados
+│   ├── test_parser.py      # Validación de esquemas Pydantic v2 y SSRF de 2º orden
 │   ├── test_plugin.py      # Ciclo de vida (startup, shutdown, health_check) y carga mock
 │   ├── test_risk.py        # Cobertura de métodos mutativos, GET público y GET sensibles
-│   └── test_ssrf.py        # Cobertura de vectores SSRF (RFC 1918, metadata, loopback)
+│   └── test_ssrf.py        # Cobertura de vectores SSRF (RFC 1918, metadata, loopback, allowlist)
 ├── scripts/
 │   └── check.sh            # Pipeline de verificación de calidad (Ruff + Pytest)
 ├── install.sh              # Script de aprovisionamiento de entorno virtual y dependencias
@@ -108,4 +113,4 @@ El proyecto dispone de un script automatizado de verificación de calidad (`scri
 
 **Resultados de la última validación:**
 - **Ruff:** 0 errores, formato 100% verificado (`All checks passed!`).
-- **Pytest:** 21 tests unitarios y de integración ejecutados y superados con éxito en 0.21 segundos.
+- **Pytest:** 23 tests unitarios y de integración ejecutados y superados con éxito.

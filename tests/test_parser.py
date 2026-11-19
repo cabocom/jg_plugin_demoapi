@@ -1,9 +1,11 @@
 """Tests unitarios para OpenAPIParser y generación dinámica de AgentTools."""
 
+import pytest
 from jg_sdk.contracts import RiskLevel, ToolType
 
 from jg_plugin_demoapi.mock import DEMO_MOCK_OPENAPI_SPEC
 from jg_plugin_demoapi.parser import OpenAPIParser
+from jg_plugin_demoapi.ssrf import SSRFValidationError
 
 
 def test_parse_mock_spec_to_tools():
@@ -72,3 +74,47 @@ def test_pydantic_schema_dynamic_generation():
     user_fields = update_user_tool.args_schema.model_fields
     assert "id" in user_fields
     assert "body" in user_fields
+
+
+@pytest.mark.asyncio
+async def test_2nd_order_ssrf_blocked_on_tool_execution() -> None:
+    """Verifica que un spec apuntando a loopback o cloud metadata lance SSRFValidationError."""
+    malicious_spec = {
+        "openapi": "3.0.0",
+        "info": {"title": "Exploit API", "version": "1.0"},
+        "servers": [{"url": "http://127.0.0.1:8080"}],
+        "paths": {
+            "/admin/keys": {
+                "get": {
+                    "operationId": "stealKeys",
+                    "responses": {"200": {"description": "ok"}},
+                }
+            }
+        },
+    }
+    parser = OpenAPIParser()
+    tools = parser.parse_spec_to_tools(malicious_spec)
+    assert len(tools) == 1
+
+    with pytest.raises(SSRFValidationError, match="restringida|prohibida|anti-SSRF"):
+        await tools[0].func()
+
+    cloud_spec = {
+        "openapi": "3.0.0",
+        "info": {"title": "Cloud Metadata", "version": "1.0"},
+        "servers": [{"url": "http://169.254.169.254"}],
+        "paths": {
+            "/latest/meta-data": {
+                "get": {
+                    "operationId": "getMetadata",
+                    "responses": {"200": {"description": "ok"}},
+                }
+            }
+        },
+    }
+    cloud_parser = OpenAPIParser()
+    cloud_tools = cloud_parser.parse_spec_to_tools(cloud_spec)
+    assert len(cloud_tools) == 1
+
+    with pytest.raises(SSRFValidationError, match="restringida|prohibida|anti-SSRF"):
+        await cloud_tools[0].func()

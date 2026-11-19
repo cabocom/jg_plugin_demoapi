@@ -22,7 +22,7 @@ async def test_execution_of_generated_tool_with_mock_transport():
     transport = httpx.MockTransport(mock_handler)
     mock_client = httpx.AsyncClient(transport=transport)
 
-    parser = OpenAPIParser(http_client=mock_client)
+    parser = OpenAPIParser(http_client=mock_client, allowlist=["mock-api"])
     tools = parser.parse_spec_to_tools(
         DEMO_MOCK_OPENAPI_SPEC,
         base_url_override="http://mock-api:8080",
