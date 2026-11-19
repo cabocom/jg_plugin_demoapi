@@ -57,16 +57,68 @@ def _summarize_tools_manifest(
         "tools_manifest": [
             {
                 "name": t.name,
-                "method": t.metadata.get("openapi_method"),
-                "path": t.metadata.get("openapi_path"),
+                "description": t.description,
                 "risk_level": t.risk_level.value,
                 "tool_type": t.tool_type.value,
+                "read_only": t.read_only,
                 "requires_hitl": t.metadata.get("requires_hitl", False),
+                "is_sensitive_read": t.metadata.get("is_sensitive_read", False),
                 "required_permissions": t.required_permissions,
             }
             for t in tools
         ],
     }
+
+
+def _format_ssrf_error(
+    err: SSRFValidationError, openapi_url: str, duration_ms: float
+) -> ToolResult:
+    """Registra y formatea el fallo por bloqueo SSRF."""
+    logger.warning("Intento de acceso SSRF bloqueado al cargar OpenAPI '%s': %s", openapi_url, err)
+    return ToolResult(
+        success=False,
+        output="",
+        error=f"Bloqueo de seguridad Anti-SSRF: {err}",
+        duration_ms=duration_ms,
+        metadata={"security_event": "ssrf_violation", "target": err.target},
+    )
+
+
+def _format_generic_error(err: Exception, openapi_url: str, duration_ms: float) -> ToolResult:
+    """Registra y formatea errores genéricos durante la ingesta."""
+    logger.error("Error durante la ingesta del contrato OpenAPI '%s': %s", openapi_url, err)
+    return ToolResult(
+        success=False,
+        output="",
+        error=f"Error durante la ingesta del contrato OpenAPI: {err}",
+        duration_ms=duration_ms,
+    )
+
+
+async def _execute_ingest_safely(
+    manager: DemoApiToolManager,
+    openapi_url: str,
+    force_refresh: bool,
+    start_time: float,
+) -> ToolResult:
+    """Ejecuta la ingesta OpenAPI capturando excepciones de seguridad y operativas."""
+    try:
+        tools, telemetry = await manager.ingest_openapi(
+            openapi_url=openapi_url,
+            force_refresh=force_refresh,
+        )
+        summary = _summarize_tools_manifest(tools, openapi_url, telemetry)
+        return ToolResult(
+            success=True,
+            output=summary,
+            error=None,
+            duration_ms=(time.time() - start_time) * 1000,
+            metadata=telemetry,
+        )
+    except SSRFValidationError as err:
+        return _format_ssrf_error(err, openapi_url, (time.time() - start_time) * 1000)
+    except Exception as err:
+        return _format_generic_error(err, openapi_url, (time.time() - start_time) * 1000)
 
 
 def create_load_openapi_tool(manager: DemoApiToolManager | None = None) -> AgentTool:
@@ -75,47 +127,7 @@ def create_load_openapi_tool(manager: DemoApiToolManager | None = None) -> Agent
 
     async def _load_openapi(openapi_url: str, force_refresh: bool = False) -> ToolResult:
         start_time = time.time()
-        try:
-            tools, telemetry = await active_manager.ingest_openapi(
-                openapi_url=openapi_url,
-                force_refresh=force_refresh,
-            )
-            summary = _summarize_tools_manifest(tools, openapi_url, telemetry)
-            duration_ms = (time.time() - start_time) * 1000
-            return ToolResult(
-                success=True,
-                output=summary,
-                error=None,
-                duration_ms=duration_ms,
-                metadata=telemetry,
-            )
-        except SSRFValidationError as err:
-            logger.warning(
-                "Intento de acceso SSRF bloqueado al cargar OpenAPI '%s': %s",
-                openapi_url,
-                err,
-            )
-            duration_ms = (time.time() - start_time) * 1000
-            return ToolResult(
-                success=False,
-                output="",
-                error=f"Bloqueo de seguridad Anti-SSRF: {err}",
-                duration_ms=duration_ms,
-                metadata={"security_event": "ssrf_violation", "target": err.target},
-            )
-        except Exception as err:
-            logger.error(
-                "Error durante la ingesta del contrato OpenAPI '%s': %s",
-                openapi_url,
-                err,
-            )
-            duration_ms = (time.time() - start_time) * 1000
-            return ToolResult(
-                success=False,
-                output="",
-                error=f"Error durante la ingesta del contrato OpenAPI: {err}",
-                duration_ms=duration_ms,
-            )
+        return await _execute_ingest_safely(active_manager, openapi_url, force_refresh, start_time)
 
     return AgentTool(
         name="demoapi_load_openapi",
@@ -159,7 +171,10 @@ def create_get_mock_spec_tool() -> AgentTool:
 
     return AgentTool(
         name="demoapi_get_mock_spec",
-        description="Consulta la definición y estructura del contrato OpenAPI mock integrado para pruebas locales.",
+        description=(
+            "Obtiene el resumen y endpoints del contrato OpenAPI mock de demostración, "
+            "útil para validaciones sin conexión o entornos aislados."
+        ),
         category="demoapi",
         version="1.0.0",
         args_schema=GetMockSpecInput,
@@ -170,21 +185,18 @@ def create_get_mock_spec_tool() -> AgentTool:
         reversible=False,
         idempotent=True,
         makes_http_requests=False,
-        timeout_sec=5.0,
     )
 
 
 def get_canonical_tools(manager: DemoApiToolManager | None = None) -> list[AgentTool]:
-    """Retorna las herramientas canónicas base provistas por el plugin."""
-    mgr = manager or get_default_manager()
+    """Retorna las herramientas canónicas base del plugin."""
     return [
-        create_load_openapi_tool(mgr),
+        create_load_openapi_tool(manager),
         create_get_mock_spec_tool(),
     ]
 
 
 __all__ = [
-    "_summarize_tools_manifest",
     "create_get_mock_spec_tool",
     "create_load_openapi_tool",
     "get_canonical_tools",

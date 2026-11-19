@@ -7,13 +7,18 @@ import logging
 import re
 import time
 from typing import Any
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin
 
 import httpx
 import yaml
 from jg_sdk.contracts import AgentTool, ToolResult
 
-from jg_plugin_demoapi.risk import RiskClassifier
+from jg_plugin_demoapi.http_executor import (
+    build_pinned_http_kwargs,
+    execute_and_parse_http,
+    handle_exec_error,
+)
+from jg_plugin_demoapi.risk import RiskClassification, RiskClassifier
 from jg_plugin_demoapi.schema_builder import (
     _build_pydantic_schema_from_operation,
     _sanitize_tool_name,
@@ -36,6 +41,31 @@ def _extract_default_base_url(spec: dict[str, Any], base_url_override: str | Non
     ):
         return str(servers[0]["url"]).rstrip("/")
     return ""
+
+
+def _resolve_request_target_and_payload(
+    path: str,
+    base_url: str,
+    parameters_def: list[dict[str, Any]],
+    clean_kwargs: dict[str, Any],
+) -> tuple[str, dict[str, Any], Any]:
+    """Resuelve la URL destino, reemplaza path parameters y extrae query params y body."""
+    path_param_names = {p["name"] for p in parameters_def if p.get("in") == "path"}
+    query_param_names = {p["name"] for p in parameters_def if p.get("in") == "query"}
+
+    resolved_path = path
+    for p_name in path_param_names:
+        if p_name in clean_kwargs:
+            resolved_path = resolved_path.replace(f"{{{p_name}}}", str(clean_kwargs[p_name]))
+
+    query_params = {k: v for k, v in clean_kwargs.items() if k in query_param_names}
+    body_payload = clean_kwargs.get("body")
+    target_url = (
+        urljoin(base_url.rstrip("/") + "/", resolved_path.lstrip("/"))
+        if base_url
+        else resolved_path
+    )
+    return target_url, query_params, body_payload
 
 
 class OpenAPIParser:
@@ -63,9 +93,39 @@ class OpenAPIParser:
         try:
             return yaml.safe_load(raw_stripped)
         except Exception as err:
+            logger.error("Error al parsear especificación OpenAPI como YAML/JSON: %s", err)
             raise ValueError(
                 f"No se pudo parsear el contrato OpenAPI (JSON ni YAML válidos): {err}"
             ) from err
+
+    def _assemble_tool(
+        self,
+        tool_name: str,
+        desc: str,
+        schema_cls: Any,
+        tool_func: Any,
+        cls_info: RiskClassification,
+        meta: dict[str, Any],
+        method: str,
+    ) -> AgentTool:
+        """Instancia la herramienta AgentTool con directivas de seguridad y riesgo."""
+        return AgentTool(
+            name=tool_name,
+            description=desc,
+            category="demoapi",
+            version="1.0.0",
+            args_schema=schema_cls,
+            func=tool_func,
+            risk_level=cls_info.risk_level,
+            required_permissions=cls_info.required_permissions,
+            tool_type=cls_info.tool_type,
+            read_only=cls_info.read_only,
+            reversible=False,
+            idempotent=(method.upper() in ("GET", "HEAD", "PUT", "DELETE")),
+            makes_http_requests=True,
+            timeout_sec=self.timeout,
+            metadata=meta,
+        )
 
     def _build_single_tool(
         self,
@@ -90,40 +150,35 @@ class OpenAPIParser:
 
         classification = RiskClassifier.classify_operation(method, path, op)
         all_params = list(path_params) + list(op.get("parameters", []))
-        request_body = op.get("requestBody")
+        schema_cls = _build_pydantic_schema_from_operation(op_id, all_params, op.get("requestBody"))
+        tool_func = self._create_execution_func(method.upper(), path, default_base_url, all_params)
 
-        schema_cls = _build_pydantic_schema_from_operation(op_id, all_params, request_body)
-        tool_func = self._create_execution_func(
-            method=method.upper(),
-            path=path,
-            base_url=default_base_url,
-            parameters_def=all_params,
+        metadata = {
+            "openapi_method": method.upper(),
+            "openapi_path": path,
+            "operation_id": op_id,
+            "requires_hitl": classification.requires_hitl,
+            "is_sensitive_read": classification.is_sensitive_read,
+            "risk_reason": classification.reason,
+        }
+        return self._assemble_tool(
+            tool_name, desc, schema_cls, tool_func, classification, metadata, method
         )
 
-        return AgentTool(
-            name=tool_name,
-            description=desc,
-            category="demoapi",
-            version="1.0.0",
-            args_schema=schema_cls,
-            func=tool_func,
-            risk_level=classification.risk_level,
-            required_permissions=classification.required_permissions,
-            tool_type=classification.tool_type,
-            read_only=classification.read_only,
-            reversible=False,
-            idempotent=(method.upper() in ("GET", "HEAD", "PUT", "DELETE")),
-            makes_http_requests=True,
-            timeout_sec=self.timeout,
-            metadata={
-                "openapi_method": method.upper(),
-                "openapi_path": path,
-                "operation_id": op_id,
-                "requires_hitl": classification.requires_hitl,
-                "is_sensitive_read": classification.is_sensitive_read,
-                "risk_reason": classification.reason,
-            },
-        )
+    def _extract_path_operations(
+        self, path: str, path_item: dict[str, Any], default_base_url: str
+    ) -> list[AgentTool]:
+        """Extrae todas las herramientas para un path específico de OpenAPI."""
+        tools: list[AgentTool] = []
+        path_params = path_item.get("parameters", [])
+        for method in ("get", "post", "put", "patch", "delete", "head", "options"):
+            if method in path_item and isinstance(path_item[method], dict):
+                tools.append(
+                    self._build_single_tool(
+                        path, method, path_item[method], path_params, default_base_url
+                    )
+                )
+        return tools
 
     def parse_spec_to_tools(
         self,
@@ -142,18 +197,8 @@ class OpenAPIParser:
         tools: list[AgentTool] = []
 
         for path, path_item in paths.items():
-            if not isinstance(path_item, dict):
-                continue
-
-            path_params = path_item.get("parameters", [])
-            for method in ("get", "post", "put", "patch", "delete", "head", "options"):
-                if method not in path_item:
-                    continue
-                op = path_item[method]
-                if isinstance(op, dict):
-                    tools.append(
-                        self._build_single_tool(path, method, op, path_params, default_base_url)
-                    )
+            if isinstance(path_item, dict):
+                tools.extend(self._extract_path_operations(path, path_item, default_base_url))
 
         logger.info("OpenAPI parseado exitosamente: %d herramientas generadas.", len(tools))
         return tools
@@ -170,86 +215,25 @@ class OpenAPIParser:
         async def _exec(**kwargs: Any) -> ToolResult:
             start_time = time.time()
             clean_kwargs = {k: v for k, v in kwargs.items() if v is not None}
-
-            # Separar path params, query params y body
-            path_param_names = {p["name"] for p in parameters_def if p.get("in") == "path"}
-            query_param_names = {p["name"] for p in parameters_def if p.get("in") == "query"}
-
-            resolved_path = path
-            for p_name in path_param_names:
-                if p_name in clean_kwargs:
-                    resolved_path = resolved_path.replace(
-                        f"{{{p_name}}}", str(clean_kwargs[p_name])
-                    )
-
-            query_params = {k: v for k, v in clean_kwargs.items() if k in query_param_names}
-            body_payload = clean_kwargs.get("body")
-
-            target_url = (
-                urljoin(base_url.rstrip("/") + "/", resolved_path.lstrip("/"))
-                if base_url
-                else resolved_path
+            target_url, query_params, body_payload = _resolve_request_target_and_payload(
+                path, base_url, parameters_def, clean_kwargs
             )
 
-            # Validación obligatoria anti-SSRF de segundo orden (2nd order SSRF)
             pinned = await SSRFValidator.resolve_and_pin_url_async(
-                target_url,
-                allowlist=self.allowlist,
+                target_url, allowlist=self.allowlist
             )
-
-            # Cliente HTTP para la ejecución
             client = self.http_client or httpx.AsyncClient(timeout=self.timeout)
             should_close = self.http_client is None
 
             try:
-                headers = {"Accept": "application/json"}
-                if self.http_client is None:
-                    parsed_target = urlparse(target_url)
-                    exec_url = pinned.build_pinned_url(parsed_target.path)
-                    host_header = pinned.hostname
-                    if (pinned.is_ssl and pinned.port != 443) or (
-                        not pinned.is_ssl and pinned.port != 80
-                    ):
-                        host_header = f"{host_header}:{pinned.port}"
-                    headers["Host"] = host_header
-                else:
-                    exec_url = target_url
-
-                req_kwargs: dict[str, Any] = {"headers": headers, "params": query_params}
-                if body_payload is not None:
-                    req_kwargs["json"] = body_payload
-
-                response = await client.request(
-                    method, exec_url, follow_redirects=False, **req_kwargs
+                exec_url, req_kwargs = build_pinned_http_kwargs(
+                    target_url, pinned, self.http_client is not None, query_params, body_payload
                 )
-                duration_ms = (time.time() - start_time) * 1000
-
-                try:
-                    res_data = response.json()
-                except Exception:
-                    res_data = response.text
-
-                is_success = 200 <= response.status_code < 300
-                return ToolResult(
-                    success=is_success,
-                    output=res_data,
-                    error=None if is_success else f"HTTP {response.status_code}: {res_data}",
-                    duration_ms=duration_ms,
-                    metadata={
-                        "status_code": response.status_code,
-                        "url": target_url,
-                        "method": method,
-                    },
+                return await execute_and_parse_http(
+                    client, method, exec_url, req_kwargs, target_url, start_time
                 )
             except Exception as err:
-                duration_ms = (time.time() - start_time) * 1000
-                return ToolResult(
-                    success=False,
-                    output="",
-                    error=f"Error durante la ejecución HTTP de {method} {target_url}: {err}",
-                    duration_ms=duration_ms,
-                    metadata={"url": target_url, "method": method},
-                )
+                return handle_exec_error(err, method, target_url, start_time)
             finally:
                 if should_close:
                     await client.aclose()

@@ -20,4 +20,4 @@
   1. Eliminar la implementación duplicada en `jg_plugin_demoapi/ssrf.py` y delegar en `jg_sdk.security.ssrf.SSRFValidator`.
   2. Dividir `parse_spec_to_tools` (`105L`) e `ingest_openapi` (`101L`) en métodos privados `<= 40` líneas y añadir `logger.warning/error` en los bloques `except` de `parser.py` y `tools.py`.
 - **Criterios de Aceptación (Checklist verificable):**
-  - [ ] `ruff check .` y `pytest` pasan al 100% en `jg_plugin_demoapi`.
+  - [x] `ruff check .` y `pytest` pasan al 100% en `jg_plugin_demoapi`.

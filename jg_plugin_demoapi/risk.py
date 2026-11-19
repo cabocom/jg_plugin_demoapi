@@ -85,56 +85,44 @@ class RiskClassifier:
         return sorted(set(scopes))
 
     @classmethod
-    def classify_operation(
-        cls,
-        method: str,
-        path: str,
-        operation_dict: dict[str, Any] | None = None,
+    def _classify_mutative(cls, method_upper: str, scopes: list[str]) -> RiskClassification:
+        """Clasifica operaciones con métodos HTTP mutativos."""
+        return RiskClassification(
+            risk_level=RiskLevel.HIGH,
+            read_only=False,
+            tool_type=ToolType.MUTATION,
+            requires_hitl=True,
+            is_sensitive_read=False,
+            required_permissions=scopes,
+            reason=f"Método mutativo {method_upper}: modifica estado y requiere aprobación HITL.",
+        )
+
+    @classmethod
+    def _classify_sensitive_read(
+        cls, path: str, scopes: list[str], sensitive: bool
     ) -> RiskClassification:
-        """Clasifica el riesgo operativo de una llamada OpenAPI.
+        """Clasifica lecturas que acceden a rutas sensibles o exigen scopes de seguridad."""
+        reasons: list[str] = []
+        if sensitive:
+            reasons.append(f"Ruta sensible detectada en '{path}'")
+        if scopes:
+            reasons.append(f"Requiere scopes de seguridad: {', '.join(scopes)}")
 
-        Reglas:
-        1. Métodos mutativos (POST, PUT, PATCH, DELETE):
-           - RiskLevel.HIGH, read_only=False, tool_type=ToolType.MUTATION, requires_hitl=True.
-        2. Métodos de lectura (GET, HEAD):
-           - Si la ruta es sensible o requiere scopes RBAC:
-             RiskLevel.HIGH, read_only=True, tool_type=ToolType.READ, requires_hitl=True (o permiso explícito).
-           - De lo contrario:
-             RiskLevel.LOW, read_only=True, tool_type=ToolType.READ, requires_hitl=False.
-        """
-        method_upper = method.upper()
-        op_dict = operation_dict or {}
-        scopes = cls.extract_security_scopes(op_dict)
-        sensitive = cls.is_sensitive_path(path)
+        return RiskClassification(
+            risk_level=RiskLevel.HIGH,
+            read_only=True,
+            tool_type=ToolType.READ,
+            requires_hitl=True,
+            is_sensitive_read=True,
+            required_permissions=scopes,
+            reason=f"Lectura sensible: {'; '.join(reasons)}. Exige elevación a HITL o permisos RBAC.",
+        )
 
-        if method_upper in MUTATIVE_HTTP_METHODS:
-            return RiskClassification(
-                risk_level=RiskLevel.HIGH,
-                read_only=False,
-                tool_type=ToolType.MUTATION,
-                requires_hitl=True,
-                is_sensitive_read=False,
-                required_permissions=scopes,
-                reason=f"Método mutativo {method_upper}: modifica estado y requiere aprobación HITL.",
-            )
-
-        if sensitive or len(scopes) > 0:
-            reasons: list[str] = []
-            if sensitive:
-                reasons.append(f"Ruta sensible detectada en '{path}'")
-            if scopes:
-                reasons.append(f"Requiere scopes de seguridad: {', '.join(scopes)}")
-
-            return RiskClassification(
-                risk_level=RiskLevel.HIGH,
-                read_only=True,
-                tool_type=ToolType.READ,
-                requires_hitl=True,
-                is_sensitive_read=True,
-                required_permissions=scopes,
-                reason=f"Lectura sensible: {'; '.join(reasons)}. Exige elevación a HITL o permisos RBAC.",
-            )
-
+    @classmethod
+    def _classify_standard_read(
+        cls, method_upper: str, path: str, scopes: list[str]
+    ) -> RiskClassification:
+        """Clasifica lecturas estándar públicas."""
         return RiskClassification(
             risk_level=RiskLevel.LOW,
             read_only=True,
@@ -144,3 +132,24 @@ class RiskClassifier:
             required_permissions=scopes,
             reason=f"Lectura pública estándar {method_upper} en '{path}'. Ejecución directa autorizada.",
         )
+
+    @classmethod
+    def classify_operation(
+        cls,
+        method: str,
+        path: str,
+        operation_dict: dict[str, Any] | None = None,
+    ) -> RiskClassification:
+        """Clasifica el riesgo operativo de una llamada OpenAPI."""
+        method_upper = method.upper()
+        op_dict = operation_dict or {}
+        scopes = cls.extract_security_scopes(op_dict)
+        sensitive = cls.is_sensitive_path(path)
+
+        if method_upper in MUTATIVE_HTTP_METHODS:
+            return cls._classify_mutative(method_upper, scopes)
+
+        if sensitive or len(scopes) > 0:
+            return cls._classify_sensitive_read(path, scopes, sensitive)
+
+        return cls._classify_standard_read(method_upper, path, scopes)

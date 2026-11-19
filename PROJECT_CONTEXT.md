@@ -1,10 +1,10 @@
 # CONTEXTO DE PROYECTO: jg_plugin_demoapi
 
-**Versión del documento:** 2.1.0  
+**Versión del documento:** 2.2.0  
 **Fecha de consolidación:** 19 de noviembre de 2026  
 **Componente:** Plugin de Ingesta Dinámica de OpenAPI, Gobierno Granular de Riesgos, Caché ETag y Simulación de APIs  
 **Stack Tecnológico:** Python >= 3.11, Pydantic v2, HTTPX, PyYAML, jg-agente-sdk, Pytest, Ruff  
-**Estado:** Endurecimiento de Seguridad Anti-SSRF (ISSUE-18 / jg_plugin_demoapi#3) completado: mitigación de SSRF de 2º orden en herramientas OpenAPI dinámicas, DNS Pinning efectivo con `follow_redirects=False`, saneamiento de allowlist por defecto y modularización arquitectónica (<300 LOC). 100% tests pasando (23 tests) y Ruff limpio.
+**Estado:** Refactorización DRY y Modularización SOLID (ISSUE-19 / jg_plugin_demoapi#4) completada: eliminación de lógica SSRF duplicada mediante delegación en `jg_sdk.security.ssrf`, extracción de `http_executor.py`, división exhaustiva de funciones `<= 40` líneas (0 funciones >40L) y módulos `< 250` LOC. 100% tests pasando (23 tests) y Ruff limpio.
 
 ---
 
@@ -77,13 +77,14 @@ jg_plugin_demoapi/
 │   ├── __init__.py         # Re-exportación de contratos, plugin, parser y cache
 │   ├── cache.py            # Caché Nivel 1 (Memoria) y Nivel 2 (ETag / 304)
 │   ├── canonical_tools.py  # Herramientas canónicas base e inyección de dependencias
+│   ├── http_executor.py    # Ejecutor HTTP desacoplado con DNS Pinning y manejo de errores
 │   ├── mock.py             # Fixture OpenAPI 3.x canónico para pruebas offline
 │   ├── parser.py           # Parser OpenAPI 3.x y generador de AgentTools seguras
 │   ├── plugin.py           # Clase principal DemoApiPlugin (BasePlugin)
 │   ├── risk.py             # Clasificador determinista de riesgos y directivas HITL/RBAC
 │   ├── schema_builder.py   # Constructor dinámico de esquemas Pydantic v2
 │   ├── schemas.py          # Esquemas Pydantic tipados de entrada
-│   ├── ssrf.py             # Validador Anti-SSRF y resolución con DNS Pinning
+│   ├── ssrf.py             # Adaptador Anti-SSRF con delegación DRY a jg_sdk.security.ssrf
 │   └── tools.py            # Gestor de ingesta dinámica y ciclo de vida de herramientas
 ├── tests/                  # Suite de 23 tests unitarios y de integración (100% pasando)
 │   ├── test_cache.py       # Validación de memoria <1ms, expiración y revalidación 304

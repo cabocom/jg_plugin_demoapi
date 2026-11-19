@@ -1,48 +1,26 @@
-"""Módulo de mitigación de Server-Side Request Forgery (SSRF) y DNS Pinning."""
+"""Módulo de mitigación de Server-Side Request Forgery (SSRF) y DNS Pinning.
+
+Delega en la implementación canónica y unificada de `jg_sdk.security.ssrf` (DRY).
+"""
 
 from __future__ import annotations
 
 import asyncio
-import ipaddress
 import logging
 import socket
 from urllib.parse import urlparse
 
+from jg_sdk.security.ssrf import (
+    DEFAULT_BLOCKED_NETWORKS,
+    SSRFValidationError,
+)
+from jg_sdk.security.ssrf import (
+    SSRFValidator as SdkSSRFValidator,
+)
+
 logger = logging.getLogger("jg_plugin_demoapi.ssrf")
 
-
-class SSRFValidationError(ValueError):
-    """Excepción lanzada cuando una URL o IP viola la política de seguridad anti-SSRF."""
-
-    def __init__(self, message: str, target: str | None = None) -> None:
-        super().__init__(message)
-        self.target = target
-
-
-# Redes prohibidas por defecto (RFC 1918, Link-Local, Metadatos de Cloud, Loopback)
-BLOCKED_NETWORKS: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = [
-    # Loopback
-    ipaddress.ip_network("127.0.0.0/8"),
-    ipaddress.ip_network("::1/128"),
-    # Cloud Metadata Service (AWS, GCP, Azure, OpenStack, etc.)
-    ipaddress.ip_network("169.254.0.0/16"),
-    ipaddress.ip_network("fe80::/10"),
-    # Redes privadas RFC 1918 (IPv4)
-    ipaddress.ip_network("10.0.0.0/8"),
-    ipaddress.ip_network("172.16.0.0/12"),
-    ipaddress.ip_network("192.168.0.0/16"),
-    # Redes privadas IPv6 (RFC 4193 ULA)
-    ipaddress.ip_network("fc00::/7"),
-    # Especiales y reservadas
-    ipaddress.ip_network("0.0.0.0/8"),
-    ipaddress.ip_network("100.64.0.0/10"),  # Carrier-grade NAT (RFC 6598)
-    ipaddress.ip_network("192.0.0.0/24"),
-    ipaddress.ip_network("192.0.2.0/24"),  # TEST-NET-1
-    ipaddress.ip_network("198.51.100.0/24"),  # TEST-NET-2
-    ipaddress.ip_network("203.0.113.0/24"),  # TEST-NET-3
-    ipaddress.ip_network("224.0.0.0/4"),  # Multicast
-    ipaddress.ip_network("240.0.0.0/4"),  # Reservada
-]
+BLOCKED_NETWORKS = DEFAULT_BLOCKED_NETWORKS
 
 
 class PinnedEndpoint:
@@ -67,18 +45,33 @@ class PinnedEndpoint:
         return f"{scheme}://{self.ip}{port_part}{clean_path}"
 
 
+def _resolve_allowlisted_host(hostname: str, port: int, is_ssl: bool, url: str) -> PinnedEndpoint:
+    """Resuelve un host explícitamente autorizado en la allowlist."""
+    logger.info("Host '%s' autorizado por allowlist explícita anti-SSRF.", hostname)
+    try:
+        addr_info = socket.getaddrinfo(hostname, port, socket.AF_UNSPEC, socket.SOCK_STREAM)
+        resolved_ip = str(addr_info[0][4][0])
+    except Exception as err:
+        logger.warning("Fallo al resolver host en allowlist '%s': %s", hostname, err)
+        resolved_ip = hostname
+    return PinnedEndpoint(
+        hostname=hostname,
+        ip=resolved_ip,
+        port=port,
+        is_ssl=is_ssl,
+        original_url=url,
+    )
+
+
 class SSRFValidator:
-    """Validador determinista anti-SSRF con soporte para resolución previa y DNS Pinning."""
+    """Validador determinista anti-SSRF con delegación a jg_sdk.security.ssrf."""
 
     @classmethod
     def is_ip_blocked(cls, ip_str: str) -> bool:
         """Comprueba si una IP pertenece a rangos privados, loopback o metadatos."""
-        try:
-            ip_obj = ipaddress.ip_address(ip_str)
-        except ValueError as err:
-            raise SSRFValidationError(f"Dirección IP no válida: {ip_str}", target=ip_str) from err
-
-        return any(ip_obj in network for network in BLOCKED_NETWORKS)
+        validator = SdkSSRFValidator()
+        is_safe, _ = validator.validate_ip(ip_str)
+        return not is_safe
 
     @classmethod
     async def resolve_and_pin_url_async(
@@ -86,19 +79,22 @@ class SSRFValidator:
         url: str,
         allowlist: list[str] | None = None,
     ) -> PinnedEndpoint:
-        """Resuelve el hostname de una URL vía DNS, valida la política anti-SSRF y ata la IP (DNS Pinning).
+        """Resuelve el hostname de una URL vía DNS y fija la IP asíncronamente."""
+        return await asyncio.to_thread(cls.resolve_and_pin_url, url, allowlist)
 
-        Raises:
-            SSRFValidationError: Si el esquema no es http/https, el host no resuelve,
-                                 o resuelve a una IP interna/prohibida fuera de allowlist.
-        """
+    @classmethod
+    def resolve_and_pin_url(
+        cls,
+        url: str,
+        allowlist: list[str] | None = None,
+    ) -> PinnedEndpoint:
+        """Versión síncrona de resolución y fijado de IP delegando en SDK."""
         parsed = urlparse(url)
         if parsed.scheme not in ("http", "https"):
             raise SSRFValidationError(
                 f"Esquema de URL no permitido: '{parsed.scheme}'. Solo se admite http/https.",
                 target=url,
             )
-
         hostname = parsed.hostname
         if not hostname:
             raise SSRFValidationError("La URL no contiene un hostname válido.", target=url)
@@ -106,67 +102,29 @@ class SSRFValidator:
         is_ssl = parsed.scheme == "https"
         port = parsed.port or (443 if is_ssl else 80)
 
-        # Allowlist explícita (p. ej. mocks en red Docker o tests locales)
         if allowlist and hostname in allowlist:
-            logger.info("Host '%s' autorizado por allowlist explícita anti-SSRF.", hostname)
-            # Para hosts en allowlist, intentar resolver o usar directo
-            try:
-                loop = asyncio.get_running_loop()
-                addr_info = await loop.getaddrinfo(hostname, port, type=socket.SOCK_STREAM)
-                resolved_ip = addr_info[0][4][0]
-            except Exception:
-                resolved_ip = hostname
-            return PinnedEndpoint(
-                hostname=hostname,
-                ip=resolved_ip,
-                port=port,
-                is_ssl=is_ssl,
-                original_url=url,
-            )
+            return _resolve_allowlisted_host(hostname, port, is_ssl, url)
 
-        # Resolución asíncrona de DNS
-        loop = asyncio.get_running_loop()
-        try:
-            addr_info = await loop.getaddrinfo(hostname, port, type=socket.SOCK_STREAM)
-        except socket.gaierror as err:
+        validator = SdkSSRFValidator(allowed_hosts=allowlist or [])
+        ok, reason, pin_info = validator.resolve_and_pin_url(url)
+        if not ok or pin_info is None:
             raise SSRFValidationError(
-                f"Fallo de resolución DNS para el host '{hostname}': {err}",
+                f"Acceso denegado por política anti-SSRF: dirección prohibida o restringida. {reason}",
                 target=url,
-            ) from err
-
-        if not addr_info:
-            raise SSRFValidationError(
-                f"No se obtuvieron registros DNS para '{hostname}'.", target=url
             )
 
-        # Validar TODAS las IPs devueltas por DNS para prevenir DNS Rebinding y dual-homed bypass
-        verified_ip: str | None = None
-        for item in addr_info:
-            ip_candidate = item[4][0]
-            if cls.is_ip_blocked(ip_candidate):
-                logger.warning(
-                    "Intento de acceso SSRF bloqueado: host '%s' resuelve a IP prohibida '%s'",
-                    hostname,
-                    ip_candidate,
-                )
-                raise SSRFValidationError(
-                    f"Acceso denegado por política anti-SSRF: el host '{hostname}' "
-                    f"resuelve a la dirección restringida '{ip_candidate}'.",
-                    target=url,
-                )
-            if verified_ip is None:
-                verified_ip = ip_candidate
-
-        if not verified_ip:
-            raise SSRFValidationError(
-                f"No se pudo verificar ninguna IP válida para '{hostname}'.", target=url
-            )
-
-        logger.debug("DNS Pinning exitoso para host '%s' -> IP '%s'", hostname, verified_ip)
         return PinnedEndpoint(
-            hostname=hostname,
-            ip=verified_ip,
-            port=port,
-            is_ssl=is_ssl,
+            hostname=pin_info["hostname"],
+            ip=pin_info["pinned_ip"],
+            port=pin_info["port"],
+            is_ssl=pin_info["scheme"] == "https",
             original_url=url,
         )
+
+
+__all__ = [
+    "BLOCKED_NETWORKS",
+    "PinnedEndpoint",
+    "SSRFValidationError",
+    "SSRFValidator",
+]
