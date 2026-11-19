@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 authors = [{ name = "Javier Gálvez" }]
 dependencies = [
-    "jg-agente-sdk>=1.0.0,<2.0.0",
+    "jg-agente-sdk>=2.0.0",
     "pydantic>=2.0.0",
     "httpx>=0.25.0",
     "pyyaml>=6.0",
