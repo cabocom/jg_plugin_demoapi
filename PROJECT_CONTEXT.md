@@ -1,16 +1,18 @@
 # CONTEXTO DE PROYECTO: jg_plugin_demoapi
 
-**Versión del documento:** 2.2.0  
-**Fecha de consolidación:** 19 de noviembre de 2026  
+**Versión del documento:** 2.3.0  
+**Fecha de consolidación:** 22 de noviembre de 2026  
 **Componente:** Plugin de Ingesta Dinámica de OpenAPI, Gobierno Granular de Riesgos, Caché ETag y Simulación de APIs  
-**Stack Tecnológico:** Python >= 3.11, Pydantic v2, HTTPX, PyYAML, jg-agente-sdk, Pytest, Ruff  
-**Estado:** Refactorización DRY y Modularización SOLID (ISSUE-19 / jg_plugin_demoapi#4) completada: eliminación de lógica SSRF duplicada mediante delegación en `jg_sdk.security.ssrf`, extracción de `http_executor.py`, división exhaustiva de funciones `<= 40` líneas (0 funciones >40L) y módulos `< 250` LOC. 100% tests pasando (23 tests) y Ruff limpio.
+**Stack Tecnológico:** Python >= 3.11, Pydantic v2, HTTPX, PyYAML, jg-agente-sdk >= 2.0.0, Pytest, Ruff  
+**Estado:** 100% implementado para ingesta dinámica de OpenAPI 3.x (issue #1 y duplicado #5 cerrados), alineado con `jg-agente-sdk>=2.0.0` (`f235f2f`), refactorización DRY y modularización SOLID (ISSUE-19 / jg_plugin_demoapi#4) completadas: delegación Anti-SSRF en `jg_sdk.security.ssrf`, extracción de `http_executor.py`, funciones `<= 40` líneas (0 funciones >40L) y módulos `< 250` LOC. 100% tests pasando (23 tests) y Ruff limpio.
 
 ---
 
 ## 1. Propósito y Misión Arquitectónica
 
-`jg_plugin_demoapi` es una extensión canónica para el runtime cognitivo `jg_agente` construida estrictamente sobre `jg_agente_sdk`. Su objetivo es permitir la ingesta dinámica de contratos OpenAPI/Swagger v3.x (tanto preconfigurados como inyectados en tiempo de ejecución por prospectos o clientes) y traducirlos de forma transparente y determinista a herramientas de agente (`AgentTool`).
+`jg_plugin_demoapi` es una extensión canónica para el runtime cognitivo `jg_agente` construida estrictamente sobre `jg_agente_sdk` (`>=2.0.0`). Su objetivo es permitir la ingesta dinámica de contratos OpenAPI/Swagger v3.x (tanto preconfigurados como inyectados en tiempo de ejecución por prospectos o clientes) y traducirlos de forma transparente y determinista a herramientas de agente (`AgentTool`).
+
+> **Nota Arquitectónica de Evolución del Ecosistema:** `jg_plugin_demoapi` se encuentra 100% implementado y consolidado para la ingesta dinámica de contratos OpenAPI 3.x (con los issues fundacionales #1 y su duplicado #5 cerrados). Dentro de la estrategia tecnológica de `javiergalvez-ia`, las futuras integraciones de herramientas del ecosistema priorizan el protocolo estándar **MCP (Model Context Protocol)**, manteniendo este plugin como adaptador especializado y entorno de demostración OpenAPI gobernado.
 
 El plugin permite a empresas y prospectos evaluar la gobernanza de la plataforma javiergalvez-ia conectando sus propias APIs o utilizando el entorno de simulación mock local, garantizando:
 - **Desacoplamiento Radical:** Toda interacción visual y autorización HITL de prospectos se canaliza a través del portal de clientes `jg_hub` (Livewire 3), prohibiendo cualquier dependencia de `jg_dashboard`.
@@ -93,11 +95,17 @@ jg_plugin_demoapi/
 │   ├── test_plugin.py      # Ciclo de vida (startup, shutdown, health_check) y carga mock
 │   ├── test_risk.py        # Cobertura de métodos mutativos, GET público y GET sensibles
 │   └── test_ssrf.py        # Cobertura de vectores SSRF (RFC 1918, metadata, loopback, allowlist)
+├── docs/                   # Documentación técnica en español y registro de issues/QA
+│   ├── es/                 # Arquitectura, especificación de tools, gobierno HITL y CI/CD
+│   ├── issues/             # Histórico de refactorizaciones arquitectónicas SOLID v2.0
+│   └── issues-qa/          # Backlog y resoluciones de auditoría QA (ISSUE-18, ISSUE-19)
 ├── scripts/
 │   └── check.sh            # Pipeline de verificación de calidad (Ruff + Pytest)
 ├── install.sh              # Script de aprovisionamiento de entorno virtual y dependencias
-├── pyproject.toml          # Configuración del paquete, entry points y reglas de linter
+├── pyproject.toml          # Configuración del paquete (jg-agente-sdk>=2.0.0), entry points y linter
+├── LICENSE                 # Licencia del proyecto
 ├── .gitignore              # Patrones de exclusión de git
+├── PROJECT_CONTEXT.md      # Contexto arquitectónico y estado actual del repositorio
 └── README.md               # Guía completa de uso, arquitectura e integración
 ```
 
